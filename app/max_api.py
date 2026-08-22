@@ -133,6 +133,60 @@ async def send_request(recipient_id: str, text: str, request_id: str, image: Any
         raise RuntimeError("MAX message delivery failed") from error
 
 
+async def send_message(recipient_id: str, text: str) -> None:
+    if not settings.max_send_enabled or not settings.max_bot_token:
+        return
+    target_parameter = "chat_id" if settings.max_target_type == "chat" else "user_id"
+    try:
+        async with httpx.AsyncClient(
+            timeout=settings.request_timeout_seconds,
+            verify=ssl.create_default_context(),
+        ) as client:
+            response = await client.post(
+                f"{settings.max_api_url}/messages",
+                params={target_parameter: recipient_id},
+                headers={"Authorization": settings.max_bot_token},
+                json={"text": text},
+            )
+            response.raise_for_status()
+    except httpx.HTTPError:
+        logger.exception("MAX feedback delivery failed")
+        raise
+
+
+async def ensure_webhook_subscription() -> None:
+    """Create/update the MAX webhook subscription with message_callback enabled."""
+    if not settings.max_bot_token or not settings.max_webhook_url:
+        logger.warning("MAX webhook subscription is not configured")
+        return
+    if not settings.max_webhook_secret:
+        logger.warning("MAX webhook secret is empty; callback delivery may be unauthenticated")
+    payload = {
+        "url": settings.max_webhook_url,
+        "update_types": ["message_callback"],
+    }
+    if settings.max_webhook_secret:
+        payload["secret"] = settings.max_webhook_secret
+    async with httpx.AsyncClient(
+        timeout=settings.request_timeout_seconds,
+        verify=ssl.create_default_context(),
+    ) as client:
+        response = await client.post(
+            f"{settings.max_api_url}/subscriptions",
+            headers={"Authorization": settings.max_bot_token},
+            json=payload,
+        )
+        response.raise_for_status()
+        data = response.json()
+        if isinstance(data, dict) and data.get("success") is False:
+            raise RuntimeError(f"MAX webhook subscription failed: {data.get('message', 'unknown error')}")
+        logger.info(
+            "MAX webhook subscription configured url=%s update_types=%s",
+            settings.max_webhook_url,
+            payload["update_types"],
+        )
+
+
 async def list_subscriptions() -> dict[str, Any]:
     if not settings.max_bot_token:
         raise RuntimeError("MAX bot token is not configured")
@@ -173,7 +227,7 @@ async def answer_callback(callback_id: str, text: str = "") -> None:
                 f"{settings.max_api_url}/answers",
                 params={"callback_id": callback_id},
                 headers={"Authorization": settings.max_bot_token},
-                json={"message": {"text": text, "notify": True}},
+                json={"message": {"text": text}},
             )
             response.raise_for_status()
     except httpx.HTTPError:

@@ -34,6 +34,7 @@ class Settings:
     rejected_status_value: str = os.getenv("BITRIX_REJECTED_STATUS_VALUE", "Отказано")
     max_bot_token: str = os.getenv("MAX_BOT_TOKEN", "")
     max_webhook_secret: str = os.getenv("MAX_WEBHOOK_SECRET", "")
+    max_webhook_url: str = os.getenv("MAX_WEBHOOK_URL", "https://rembovrc.ru/api/max/webhook")
     max_api_url: str = os.getenv("MAX_API_URL", "https://platform-api2.max.ru")
     max_send_enabled: bool = os.getenv("MAX_SEND_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
     max_target_type: str = os.getenv("MAX_TARGET_TYPE", "user")

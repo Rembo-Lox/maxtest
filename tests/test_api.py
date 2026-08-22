@@ -60,6 +60,42 @@ def test_callback_is_idempotent(monkeypatch):
     ]
 
 
+def test_callback_sends_feedback_to_target_chat(monkeypatch):
+    feedback = []
+
+    class SuccessfulBitrix:
+        async def get_field_map(self):
+            return SimpleNamespace(
+                status=SimpleNamespace(name="UF_STATUS", enum_id_to_value={"68": "Принято"}),
+                responder=SimpleNamespace(name="UF_RESPONDER"),
+            )
+
+        async def update_deal(self, deal_id, fields):
+            pass
+
+        async def add_timeline_comment(self, deal_id, text):
+            pass
+
+    async def fake_send_message(recipient_id, text):
+        feedback.append((recipient_id, text))
+
+    monkeypatch.setattr(main, "BitrixClient", SuccessfulBitrix)
+    monkeypatch.setattr(main, "send_message", fake_send_message)
+    with TestClient(app) as client:
+        db.create_request("feedback-request", "10", "fallback", target_chat_id="chat-10")
+        response = client.post(
+            "/api/max/webhook",
+            headers={"X-Max-Bot-Api-Secret": "max-secret"},
+            json={
+                "update_type": "message_callback",
+                "callback": {"payload": "accept:feedback-request"},
+                "user": {"user_id": 7, "name": "Ivan"},
+            },
+        )
+    assert response.json() == {"status": "processed"}
+    assert feedback == [("chat-10", "Принято")]
+
+
 def test_callback_bitrix_failure_is_retryable(monkeypatch):
     calls = []
 
@@ -131,6 +167,40 @@ def test_extract_upload_token_returns_none_for_unexpected_response():
     from app.max_api import extract_upload_token
 
     assert extract_upload_token({"photos": [], "status": "ok"}) is None
+
+
+def test_answer_callback_uses_max_answers_payload(monkeypatch):
+    requests = []
+    object.__setattr__(main.settings, "max_bot_token", "test-token")
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            pass
+
+        async def post(self, url, **kwargs):
+            requests.append((url, kwargs))
+            return Response()
+
+    monkeypatch.setattr("httpx.AsyncClient", lambda **_: Client())
+    from app.max_api import answer_callback
+    import asyncio
+
+    asyncio.run(answer_callback("callback-1", "Принято"))
+    assert requests == [(
+        "https://platform-api2.max.ru/answers",
+        {
+            "params": {"callback_id": "callback-1"},
+            "headers": {"Authorization": "test-token"},
+            "json": {"message": {"text": "Принято"}},
+        },
+    )]
 
 
 def test_nested_max_callback_updates_bitrix(monkeypatch):
