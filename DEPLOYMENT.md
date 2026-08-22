@@ -329,6 +329,21 @@ https://rembovrc.ru/api/max/webhook
 
 Запрос к MAX API выполняется с заголовком `Authorization: <MAX_BOT_TOKEN>`. Токен не передавайте в URL.
 
+`MAX_WEBHOOK_SECRET` обязан соответствовать `^[A-Za-z0-9_-]{5,256}$`. Любой другой символ (`:`, `!`, `.`, `#` и подобные) приводит к `400 Bad Request` от `POST /subscriptions`: подписка не создаётся, `GET /subscriptions` возвращает `{"subscriptions":[]}`, и MAX никогда не доставляет `message_callback` — кнопки в чате выглядят нерабочими. При старте приложение пишет в лог ошибку, если секрет не подходит под этот шаблон.
+
+Создать подписку с сервера, не вводя секреты руками:
+
+```bash
+cd /opt/maxtest
+set -a; . ./.env; set +a
+curl -sS -X POST 'https://platform-api2.max.ru/subscriptions' \
+  -H "Authorization: $MAX_BOT_TOKEN" -H 'Content-Type: application/json' \
+  -d "{\"url\":\"https://rembovrc.ru/api/max/webhook\",\"update_types\":[\"message_callback\"],\"secret\":\"$MAX_WEBHOOK_SECRET\"}"
+curl -sS 'https://platform-api2.max.ru/subscriptions' -H "Authorization: $MAX_BOT_TOKEN"
+```
+
+Ожидаемый ответ второй команды содержит вашу подписку с `message_callback`. Если подписка не отвечает 200 в течение 8 часов, MAX отписывает бота автоматически — после аварии подписку нужно создать заново.
+
 ## 11. Настройка ноды «Исходящий вебхук» в БП
 
 Не используйте стандартный исходящий webhook Bitrix24 с событиями `OnCrmDealUpdate` или `OnCrmDealAdd`. В этом проекте запрос отправляет нода **«Исходящий вебхук»** последовательного бизнес-процесса, который запускается вручную кнопкой «Мультиполятор» в карточке сделки.

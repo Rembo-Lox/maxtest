@@ -1,4 +1,5 @@
 import logging
+import re
 import secrets
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -15,6 +16,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 for noisy_logger in ("httpx", "httpcore"):
     logging.getLogger(noisy_logger).setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
+
+MAX_SECRET_PATTERN = re.compile(r"[A-Za-z0-9_-]{5,256}")
 
 
 class BitrixMessage(BaseModel):
@@ -158,6 +161,11 @@ async def prepare_deal(deal_id: str) -> tuple[DealData, str, list[DownloadedFile
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     db.init_db()
+    if settings.max_webhook_secret and not MAX_SECRET_PATTERN.fullmatch(settings.max_webhook_secret):
+        logger.error(
+            "MAX_WEBHOOK_SECRET does not match %s required by MAX; POST /subscriptions will reject it with 400 and callbacks will never be delivered",
+            MAX_SECRET_PATTERN.pattern,
+        )
     if settings.bitrix_webhook_url:
         try:
             await BitrixClient().get_field_map()
