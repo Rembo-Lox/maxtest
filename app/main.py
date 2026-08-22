@@ -237,7 +237,11 @@ async def max_webhook(
     if not provided_secret:
         logger.warning("MAX webhook rejected: X-Max-Bot-Api-Secret header is missing; recreate the subscription with the secret")
     verify_token(provided_secret, settings.max_webhook_secret)
-    event = await request.json()
+    try:
+        event = await request.json()
+    except ValueError:
+        logger.warning("MAX webhook ignored: body is not valid JSON")
+        return {"status": "ignored"}
     if not isinstance(event, dict):
         logger.warning("MAX webhook ignored: payload is not an object")
         return {"status": "ignored"}
@@ -265,7 +269,7 @@ async def process_update(event: dict) -> str:
     claim_status, record = db.claim_callback(request_id, action, user_id, user_name)
     if record is None:
         logger.warning("MAX callback not claimed request_id=%s claim_status=%s", request_id, claim_status)
-        await answer_callback(callback_id, "Уже обработано")
+        await answer_callback(callback_id, "Заявка не найдена" if claim_status == "unknown_request" else "Уже обработано")
         return claim_status
     await answer_callback(callback_id, "Обработано")
     result = settings.accepted_status_value if action == settings.accept_action else settings.rejected_status_value

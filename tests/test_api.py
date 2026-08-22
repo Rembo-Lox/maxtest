@@ -386,3 +386,35 @@ def test_webhook_without_secret_header_is_rejected():
     with TestClient(app) as client:
         response = client.post("/api/max/webhook", json={"update_type": "message_callback"})
     assert response.status_code == 401
+
+
+def test_malformed_body_is_ignored():
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/max/webhook",
+            headers={"X-Max-Bot-Api-Secret": "max-secret", "Content-Type": "application/json"},
+            content=b"not-json",
+        )
+    assert response.status_code == 200
+    assert response.json() == {"status": "ignored"}
+
+
+def test_unknown_request_id_reports_unknown_request(monkeypatch):
+    async def fake_answer(_callback_id, _text=""):
+        pass
+
+    monkeypatch.setattr(main, "answer_callback", fake_answer)
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/max/webhook",
+            headers={"X-Max-Bot-Api-Secret": "max-secret"},
+            json={
+                "update_type": "message_callback",
+                "callback": {
+                    "callback_id": "cb-unknown",
+                    "payload": "accept:req_does_not_exist",
+                    "user": {"user_id": 1, "name": "Кто-то"},
+                },
+            },
+        )
+    assert response.json() == {"status": "unknown_request"}
