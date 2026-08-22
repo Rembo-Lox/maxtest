@@ -14,6 +14,9 @@ Docker: `docker compose up --build`.
 
 - `GET` или `POST /api/bitrix/send?deal_id=6` с заголовком `X-Bitrix-Token`.
 - `POST /api/max/webhook` с заголовком `X-Max-Bot-Api-Secret`.
+- `GET /api/max/subscriptions?token=<BITRIX_INCOMING_TOKEN>` — диагностика: показывает URL и `update_types` активных подписок MAX.
+
+Webhook принимает как одиночный `Update`, так и пакет `{"updates": [...]}`; поля `user`/`update_type` берутся как из самого события, так и из конверта. `RESPONDER_INCLUDES_RESULT=true` дописывает результат к имени в поле «Ответил в MAX».
 
 `/api/bitrix/send` получает сделку через Bitrix REST `crm.item.get`, читает текст, enum-получателя и файл `urlMachine`, затем выбирает MAX-чат через `MAX_RECIPIENT_ROUTES`. JSON допускается только для передачи `deal_id`.
 

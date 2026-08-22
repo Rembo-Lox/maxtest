@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from . import db
 from .bitrix import BitrixClient, DownloadedFile, FieldMap
 from .config import settings
-from .max_api import answer_callback, send_request
+from .max_api import answer_callback, list_subscriptions, send_request
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 for noisy_logger in ("httpx", "httpcore"):
@@ -53,18 +53,21 @@ def resolve_recipient(message: BitrixMessage) -> str:
     return recipient_id
 
 
+def iter_updates(payload: dict) -> list[dict]:
+    updates = payload.get("updates")
+    if not isinstance(updates, list):
+        return [payload]
+    envelope = {key: value for key, value in payload.items() if key != "updates"}
+    return [{**envelope, **item} for item in updates if isinstance(item, dict)]
+
+
 def extract_callback(payload: dict) -> tuple[str, str, str, str, str] | None:
-    if payload.get("update_type") != "message_callback":
+    update_type = payload.get("update_type")
+    if update_type is not None and update_type != "message_callback":
         return None
     callback = payload.get("callback")
     if not isinstance(callback, dict):
-        updates = payload.get("updates")
-        if isinstance(updates, list) and updates and isinstance(updates[0], dict):
-            callback = updates[0].get("callback")
-    if not isinstance(callback, dict):
         callback = payload
-    if not isinstance(callback, dict):
-        return None
     callback_payload = callback.get("payload")
     payload_data = callback_payload if isinstance(callback_payload, dict) else {}
     action = str(callback.get("action", payload_data.get("action", ""))).strip()
@@ -79,7 +82,7 @@ def extract_callback(payload: dict) -> tuple[str, str, str, str, str] | None:
     if action not in {settings.accept_action, settings.reject_action} or not request_id:
         return None
     callback_id = str(callback.get("callback_id") or payload.get("callback_id", "")).strip()
-    user = payload.get("user") or callback.get("user") or payload_data.get("user") or {}
+    user = callback.get("user") or payload.get("user") or payload_data.get("user") or {}
     if not isinstance(user, dict):
         return None
     user_id = str(user.get("user_id") or user.get("id") or callback.get("responder_id", "")).strip()
@@ -92,8 +95,10 @@ def extract_callback(payload: dict) -> tuple[str, str, str, str, str] | None:
 def callback_shape(payload: dict) -> dict[str, object]:
     callback = payload.get("callback")
     return {
+        "update_type": str(payload.get("update_type", "")),
         "top_level_keys": sorted(str(key) for key in payload),
         "callback_keys": sorted(str(key) for key in callback) if isinstance(callback, dict) else [],
+        "payload_type": type(callback.get("payload")).__name__ if isinstance(callback, dict) else "none",
         "has_updates": isinstance(payload.get("updates"), list),
         "has_callback_id": bool(
             (callback.get("callback_id") if isinstance(callback, dict) else None)
@@ -214,19 +219,40 @@ async def bitrix_send(
         raise HTTPException(status_code=502, detail=detail) from error
 
 
+@app.get("/api/max/subscriptions")
+async def max_subscriptions(
+    request: Request,
+    x_bitrix_token: str | None = Header(default=None),
+) -> dict[str, object]:
+    verify_token(x_bitrix_token or request.query_params.get("token"), settings.bitrix_incoming_token)
+    return await list_subscriptions()
+
+
 @app.post("/api/max/webhook", status_code=200)
 async def max_webhook(
     request: Request,
     x_max_bot_api_secret: str | None = Header(default=None),
 ) -> dict[str, str]:
-    verify_token(x_max_bot_api_secret, settings.max_webhook_secret)
+    provided_secret = x_max_bot_api_secret or request.query_params.get("secret")
+    if not provided_secret:
+        logger.warning("MAX webhook rejected: X-Max-Bot-Api-Secret header is missing; recreate the subscription with the secret")
+    verify_token(provided_secret, settings.max_webhook_secret)
     event = await request.json()
-    if isinstance(event, dict) and event.get("update_type") == "message_callback":
-        logger.info("MAX callback received shape=%s", callback_shape(event))
+    if not isinstance(event, dict):
+        logger.warning("MAX webhook ignored: payload is not an object")
+        return {"status": "ignored"}
+    statuses = []
+    for update in iter_updates(event):
+        logger.info("MAX update received shape=%s", callback_shape(update))
+        statuses.append(await process_update(update))
+    return {"status": statuses[0] if len(statuses) == 1 else ("processed" if "processed" in statuses else "ignored")}
+
+
+async def process_update(event: dict) -> str:
     callback = extract_callback(event)
     if callback is None:
         logger.warning("MAX callback ignored: unsupported shape")
-        return {"status": "ignored"}
+        return "ignored"
     action, request_id, user_id, user_name, callback_id = callback
     logger.info(
         "MAX callback parsed action=%s request_id=%s has_callback_id=%s responder_id_present=%s responder_name_present=%s",
@@ -238,7 +264,9 @@ async def max_webhook(
     )
     claim_status, record = db.claim_callback(request_id, action, user_id, user_name)
     if record is None:
-        return {"status": claim_status}
+        logger.warning("MAX callback not claimed request_id=%s claim_status=%s", request_id, claim_status)
+        await answer_callback(callback_id, "Уже обработано")
+        return claim_status
     await answer_callback(callback_id, "Обработано")
     result = settings.accepted_status_value if action == settings.accept_action else settings.rejected_status_value
     try:
@@ -247,7 +275,8 @@ async def max_webhook(
         status_id = next((item_id for item_id, value in field_map.status.enum_id_to_value.items() if value == result), None)
         if status_id is None:
             raise RuntimeError(f"Bitrix status value not found: {result}")
-        fields = {field_map.status.name: status_id, field_map.responder.name: user_name}
+        responder_value = f"{user_name} — {result}" if settings.responder_includes_result else user_name
+        fields = {field_map.status.name: status_id, field_map.responder.name: responder_value}
         if not record["bitrix_updated_at"]:
             await client.update_deal(record["deal_id"], fields)
             db.mark_bitrix_updated(request_id)
@@ -259,5 +288,6 @@ async def max_webhook(
     except Exception:
         db.release_callback(request_id)
         logger.exception("Bitrix update failed; request_id=%s", request_id)
-        return {"status": "retryable_error"}
-    return {"status": "processed"}
+        return "retryable_error"
+    logger.info("Bitrix deal updated deal_id=%s status=%s responder=%s", record["deal_id"], result, user_name)
+    return "processed"

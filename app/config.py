@@ -43,6 +43,7 @@ class Settings:
     callback_delimiter: str = os.getenv("CALLBACK_DELIMITER", ":")
     accept_action: str = os.getenv("ACCEPT_ACTION", "accept")
     reject_action: str = os.getenv("REJECT_ACTION", "reject")
+    responder_includes_result: bool = os.getenv("RESPONDER_INCLUDES_RESULT", "false").lower() in {"1", "true", "yes", "on"}
     accept_button_text: str = os.getenv("ACCEPT_BUTTON_TEXT", "Принять")
     reject_button_text: str = os.getenv("REJECT_BUTTON_TEXT", "Отказать")
     request_timeout_seconds: float = float(os.getenv("REQUEST_TIMEOUT_SECONDS", "15"))

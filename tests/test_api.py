@@ -5,6 +5,7 @@ from types import SimpleNamespace
 os.environ["BITRIX_INCOMING_TOKEN"] = "bitrix-secret"
 os.environ["MAX_WEBHOOK_SECRET"] = "max-secret"
 os.environ["MAX_BOT_TOKEN"] = ""
+os.environ["MAX_SEND_ENABLED"] = "false"
 os.environ["BITRIX_WEBHOOK_URL"] = ""
 os.environ["DATABASE_PATH"] = os.path.join(tempfile.gettempdir(), "maxtest-api.db")
 
@@ -287,3 +288,101 @@ def test_download_file_uses_url_machine_without_logging_url(monkeypatch):
     assert result.file_id == "136"
     assert result.content == b"image-bytes"
     assert result.content_type == "image/png"
+
+
+def test_max_documented_callback_shape_updates_bitrix(monkeypatch):
+    calls = []
+
+    class SuccessfulBitrix:
+        async def get_field_map(self):
+            return SimpleNamespace(
+                status=SimpleNamespace(name="UF_STATUS", enum_id_to_value={"69": "Отказано"}),
+                responder=SimpleNamespace(name="UF_RESPONDER"),
+            )
+
+        async def update_deal(self, deal_id, fields):
+            calls.append((deal_id, fields))
+
+        async def add_timeline_comment(self, deal_id, text):
+            calls.append((deal_id, text))
+
+    async def fake_answer(_callback_id, _text=""):
+        pass
+
+    monkeypatch.setattr(main, "BitrixClient", SuccessfulBitrix)
+    monkeypatch.setattr(main, "answer_callback", fake_answer)
+    with TestClient(app) as client:
+        db.create_request("documented-callback", "9", "2")
+        response = client.post(
+            "/api/max/webhook",
+            headers={"X-Max-Bot-Api-Secret": "max-secret"},
+            json={
+                "update_type": "message_callback",
+                "timestamp": 1,
+                "callback": {
+                    "timestamp": 1,
+                    "callback_id": "cb-9",
+                    "payload": "reject:documented-callback",
+                    "user": {"user_id": 55, "name": "Вася Пупкин", "is_bot": False},
+                },
+                "message": {"body": {"mid": "mid-1"}},
+            },
+        )
+    assert response.json() == {"status": "processed"}
+    assert calls == [
+        ("9", {"UF_STATUS": "69", "UF_RESPONDER": "Вася Пупкин"}),
+        ("9", "MAX: сообщение отказано. Ответил: Вася Пупкин."),
+    ]
+
+
+def test_batched_updates_envelope_without_update_type(monkeypatch):
+    calls = []
+
+    class SuccessfulBitrix:
+        async def get_field_map(self):
+            return SimpleNamespace(
+                status=SimpleNamespace(name="UF_STATUS", enum_id_to_value={"68": "Принято"}),
+                responder=SimpleNamespace(name="UF_RESPONDER"),
+            )
+
+        async def update_deal(self, deal_id, fields):
+            calls.append((deal_id, fields))
+
+        async def add_timeline_comment(self, deal_id, text):
+            calls.append((deal_id, text))
+
+    async def fake_answer(_callback_id, _text=""):
+        pass
+
+    monkeypatch.setattr(main, "BitrixClient", SuccessfulBitrix)
+    monkeypatch.setattr(main, "answer_callback", fake_answer)
+    with TestClient(app) as client:
+        db.create_request("batched-callback", "10", "2")
+        response = client.post(
+            "/api/max/webhook",
+            headers={"X-Max-Bot-Api-Secret": "max-secret"},
+            json={
+                "updates": [
+                    {
+                        "update_type": "message_callback",
+                        "callback": {
+                            "callback_id": "cb-10",
+                            "payload": "accept:batched-callback",
+                            "user": {"user_id": 56, "name": "Иван"},
+                        },
+                    }
+                ],
+                "marker": 123,
+            },
+        )
+    assert response.json() == {"status": "processed"}
+    assert calls == [
+        ("10", {"UF_STATUS": "68", "UF_RESPONDER": "Иван"}),
+        ("10", "MAX: сообщение принято. Ответил: Иван."),
+    ]
+
+
+def test_webhook_without_secret_header_is_rejected():
+    with TestClient(app) as client:
+        response = client.post("/api/max/webhook", json={"update_type": "message_callback"})
+    assert response.status_code == 401

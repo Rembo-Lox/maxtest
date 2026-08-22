@@ -133,6 +133,34 @@ async def send_request(recipient_id: str, text: str, request_id: str, image: Any
         raise RuntimeError("MAX message delivery failed") from error
 
 
+async def list_subscriptions() -> dict[str, Any]:
+    if not settings.max_bot_token:
+        raise RuntimeError("MAX bot token is not configured")
+    async with httpx.AsyncClient(
+        timeout=settings.request_timeout_seconds,
+        verify=ssl.create_default_context(),
+    ) as client:
+        response = await client.get(
+            f"{settings.max_api_url}/subscriptions",
+            headers={"Authorization": settings.max_bot_token},
+        )
+        response.raise_for_status()
+        data = response.json()
+    subscriptions = data.get("subscriptions", []) if isinstance(data, dict) else []
+    return {
+        "subscriptions": [
+            {
+                "url": item.get("url"),
+                "update_types": item.get("update_types"),
+                "time": item.get("time"),
+                "version": item.get("version"),
+            }
+            for item in subscriptions
+            if isinstance(item, dict)
+        ]
+    }
+
+
 async def answer_callback(callback_id: str, text: str = "") -> None:
     if not callback_id or not settings.max_bot_token:
         return
