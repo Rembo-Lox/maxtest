@@ -34,6 +34,7 @@ class Settings:
     rejected_status_value: str = os.getenv("BITRIX_REJECTED_STATUS_VALUE", "Отказано")
     max_bot_token: str = os.getenv("MAX_BOT_TOKEN", "")
     max_webhook_secret: str = os.getenv("MAX_WEBHOOK_SECRET", "")
+    max_webhook_url: str = os.getenv("MAX_WEBHOOK_URL", "https://rembovrc.ru/api/max/webhook")
     max_api_url: str = os.getenv("MAX_API_URL", "https://platform-api2.max.ru")
     max_send_enabled: bool = os.getenv("MAX_SEND_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
     max_target_type: str = os.getenv("MAX_TARGET_TYPE", "user")
@@ -43,6 +44,7 @@ class Settings:
     callback_delimiter: str = os.getenv("CALLBACK_DELIMITER", ":")
     accept_action: str = os.getenv("ACCEPT_ACTION", "accept")
     reject_action: str = os.getenv("REJECT_ACTION", "reject")
+    responder_includes_result: bool = os.getenv("RESPONDER_INCLUDES_RESULT", "false").lower() in {"1", "true", "yes", "on"}
     accept_button_text: str = os.getenv("ACCEPT_BUTTON_TEXT", "Принять")
     reject_button_text: str = os.getenv("REJECT_BUTTON_TEXT", "Отказать")
     request_timeout_seconds: float = float(os.getenv("REQUEST_TIMEOUT_SECONDS", "15"))

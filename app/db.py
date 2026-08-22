@@ -106,7 +106,9 @@ def claim_callback(request_id: str, action: str, user_id: str, user_name: str) -
         )
         if cursor.rowcount != 1:
             existing = connection.execute("SELECT status FROM requests WHERE request_id = ?", (request_id,)).fetchone()
-            return ("already_processed" if existing and existing["status"] in {"accepted", "rejected"} else "processing", None)
+            if existing is None:
+                return "unknown_request", None
+            return ("already_processed" if existing["status"] in {"accepted", "rejected"} else "processing", None)
         return "claimed", connection.execute("SELECT * FROM requests WHERE request_id = ?", (request_id,)).fetchone()
 
 
