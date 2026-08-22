@@ -292,7 +292,7 @@ async def process_update(event: dict) -> str:
     # Do not send a second message to the chat: POST /answers is the single
     # callback response. The recipient field is the Bitrix/MAX route name
     # used for the original request (for example, "1" or "2").
-    feedback = f"{action_text} — {user_name} — {record['recipient']}"
+    feedback = " — ".join(part for part in (action_text, user_name, record["recipient"]) if part)
     try:
         client = BitrixClient()
         field_map = await client.get_field_map()

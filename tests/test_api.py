@@ -55,45 +55,9 @@ def test_callback_is_idempotent(monkeypatch):
     assert first.json() == {"status": "processed"}
     assert second.json() == {"status": "already_processed"}
     assert calls == [
-        ("1", {"UF_STATUS": "68", "UF_RESPONDER": "Ivan"}),
+        ("1", {"UF_STATUS": "68", "UF_RESPONDER": "Принял — Ivan"}),
         ("1", "MAX: сообщение принято. Ответил: Ivan."),
     ]
-
-
-def test_callback_sends_feedback_to_target_chat(monkeypatch):
-    feedback = []
-
-    class SuccessfulBitrix:
-        async def get_field_map(self):
-            return SimpleNamespace(
-                status=SimpleNamespace(name="UF_STATUS", enum_id_to_value={"68": "Принято"}),
-                responder=SimpleNamespace(name="UF_RESPONDER"),
-            )
-
-        async def update_deal(self, deal_id, fields):
-            pass
-
-        async def add_timeline_comment(self, deal_id, text):
-            pass
-
-    async def fake_send_message(recipient_id, text):
-        feedback.append((recipient_id, text))
-
-    monkeypatch.setattr(main, "BitrixClient", SuccessfulBitrix)
-    monkeypatch.setattr(main, "send_message", fake_send_message)
-    with TestClient(app) as client:
-        db.create_request("feedback-request", "10", "fallback", target_chat_id="chat-10")
-        response = client.post(
-            "/api/max/webhook",
-            headers={"X-Max-Bot-Api-Secret": "max-secret"},
-            json={
-                "update_type": "message_callback",
-                "callback": {"payload": "accept:feedback-request"},
-                "user": {"user_id": 7, "name": "Ivan"},
-            },
-        )
-    assert response.json() == {"status": "processed"}
-    assert feedback == [("chat-10", "Принято")]
 
 
 def test_callback_bitrix_failure_is_retryable(monkeypatch):
@@ -150,7 +114,7 @@ def test_structured_callback_uses_responder_id(monkeypatch):
         response = client.post("/api/max/webhook", headers={"X-Max-Bot-Api-Secret": "max-secret"}, json=event)
     assert response.json() == {"status": "processed"}
     assert calls == [
-        ("3", {"UF_STATUS": "69", "UF_RESPONDER": "42"}),
+        ("3", {"UF_STATUS": "69", "UF_RESPONDER": "Отказал — 42"}),
         ("3", "MAX: сообщение отказано. Ответил: 42."),
     ]
 
@@ -239,7 +203,7 @@ def test_nested_max_callback_updates_bitrix(monkeypatch):
         )
     assert response.json() == {"status": "processed"}
     assert calls == [
-        ("5", {"UF_STATUS": "68", "UF_RESPONDER": "Petr"}),
+        ("5", {"UF_STATUS": "68", "UF_RESPONDER": "Принял — Petr"}),
         ("5", "MAX: сообщение принято. Ответил: Petr."),
     ]
 
@@ -400,7 +364,7 @@ def test_max_documented_callback_shape_updates_bitrix(monkeypatch):
         )
     assert response.json() == {"status": "processed"}
     assert calls == [
-        ("9", {"UF_STATUS": "69", "UF_RESPONDER": "Вася Пупкин"}),
+        ("9", {"UF_STATUS": "69", "UF_RESPONDER": "Отказал — Вася Пупкин"}),
         ("9", "MAX: сообщение отказано. Ответил: Вася Пупкин."),
     ]
 
@@ -447,7 +411,7 @@ def test_batched_updates_envelope_without_update_type(monkeypatch):
         )
     assert response.json() == {"status": "processed"}
     assert calls == [
-        ("10", {"UF_STATUS": "68", "UF_RESPONDER": "Иван"}),
+        ("10", {"UF_STATUS": "68", "UF_RESPONDER": "Принял — Иван"}),
         ("10", "MAX: сообщение принято. Ответил: Иван."),
     ]
 
