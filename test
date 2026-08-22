@@ -1,0 +1,29 @@
+$token = $env:MAX_BOT_TOKEN
+
+curl.exe -X POST "https://platform-api2.max.ru/messages?user_id=123456789" `
+  -H "Authorization: $token" `
+  -H "Content-Type: application/json" `
+  -d '{
+  "text": "Текст сообщения",
+  "attachments": [
+    {
+      "type": "inline_keyboard",
+      "payload": {
+        "buttons": [
+          [
+            {
+              "type": "callback",
+              "text": "Принять",
+              "payload": "accept:REQUEST_ID"
+            },
+            {
+              "type": "callback",
+              "text": "Отказать",
+              "payload": "reject:REQUEST_ID"
+            }
+          ]
+        ]
+      }
+    }
+  ]
+ }'
